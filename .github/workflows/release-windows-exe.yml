@@ -1,0 +1,36 @@
+name: Release Windows EXE
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependency
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Build EXE
+        run: pyinstaller --onefile --name csv-sensitive-checker check_sensitive_accounts.py
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/csv-sensitive-checker.exe
+          generate_release_notes: true

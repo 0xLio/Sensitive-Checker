@@ -46,6 +46,13 @@
 3. 在 Actions Artifact 里下载 `csv-sensitive-checker-windows`
 4. 把里面的 `csv-sensitive-checker.exe` 发给用户，用户双击即可运行
 
+如果你想直接在 GitHub Releases 提供下载：
+
+1. 提交并推送代码到 `main`
+2. 创建并推送版本标签，例如 `git tag v1.0.0 && git push origin v1.0.0`
+3. GitHub 会自动运行 `Release Windows EXE`
+4. exe 会直接挂到对应版本的 Release 页面
+
 如果你要本地自己打包 exe：
 
 1. 在 Windows 安装 Python
@@ -60,6 +67,8 @@
   给本地装了 Python 的 Windows 用户直接运行
 - `.github/workflows/build-windows-exe.yml`
   推到 GitHub 后用于自动打包 Windows exe
+- `.github/workflows/release-windows-exe.yml`
+  推送版本标签后自动创建 GitHub Release 并附带 exe
 - `build_exe.bat`
   给本地 Windows 环境手动打包 exe
 
