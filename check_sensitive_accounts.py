@@ -37,6 +37,12 @@ def prompt(text: str, default: Optional[str] = None, secret: bool = False) -> st
     return value or (default or "")
 
 
+def get_runtime_directory() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
 def list_csv_files(directory: Path) -> List[Path]:
     return sorted(
         path
@@ -286,24 +292,22 @@ def print_progress(
 
 def main() -> int:
     print("批量敏感账号检查工具")
-    print("说明：读取目录中的 CSV 文件，按第一列用户名调用 RapidAPI，并生成 *_result.csv")
+    print("说明：自动读取当前程序所在文件夹中的 CSV 文件，按第一列用户名调用 RapidAPI，并生成 *_result.csv")
     print("")
 
-    default_dir = str(Path(__file__).resolve().parent)
+    runtime_directory = get_runtime_directory()
     api_key = prompt("请输入 RapidAPI Key: ", secret=True)
     if not api_key:
         print("未输入 API Key，程序结束")
         return 1
 
-    directory_text = prompt(f"请输入 CSV 所在目录（直接回车使用 {default_dir}）: ", default=default_dir)
-    directory = Path(directory_text).expanduser().resolve()
-    if not directory.exists() or not directory.is_dir():
-        print(f"目录不存在: {directory}")
-        return 1
+    directory = runtime_directory
+    print(f"将扫描当前文件夹中的 CSV 文件: {directory}")
+    print("请把 exe 或脚本和要处理的 CSV 放在同一个文件夹内")
 
     csv_files = list_csv_files(directory)
     if not csv_files:
-        print(f"未找到 CSV 文件: {directory}")
+        print(f"当前文件夹未找到 CSV 文件: {directory}")
         return 1
 
     print("")

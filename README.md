@@ -5,7 +5,7 @@
 功能：
 
 - 启动时输入 `RapidAPI Key`
-- 扫描指定目录下的所有 `.csv` 文件
+- 自动扫描当前程序所在文件夹下的所有 `.csv` 文件
 - 读取每个 CSV 第一列的用户名
 - 调用 `twitter241` 接口查询
 - 在结果文件中追加 3 列：
@@ -37,14 +37,15 @@
 
 1. 双击 `run_checker.bat`
 2. 输入你的 `RapidAPI Key`
-3. 输入 CSV 所在目录，或直接回车使用当前目录
+3. 程序会自动扫描脚本所在文件夹里的 CSV
 
 如果你要发给没有 Python 的 Windows 用户：
 
 1. 把仓库放到 GitHub
 2. 打开 GitHub Actions，运行 `Build Windows EXE` 工作流
-3. 在 Actions Artifact 里下载 `csv-sensitive-checker-windows`
-4. 把里面的 `csv-sensitive-checker.exe` 发给用户，用户双击即可运行
+3. 在 Actions Artifact 或 Release 页面下载 `csv-sensitive-checker.exe`
+4. 把 exe 和要处理的 CSV 放到同一个文件夹
+5. 用户双击 exe，输入 `RapidAPI Key` 后即可运行
 
 如果你想直接在 GitHub Releases 提供下载：
 
@@ -81,7 +82,7 @@
 
 ## CSV 格式
 
-默认读取第一列作为用户名。
+默认读取当前程序所在文件夹中的 CSV，并读取第一列作为用户名。
 
 示例：
 
