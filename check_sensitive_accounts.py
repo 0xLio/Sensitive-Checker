@@ -43,6 +43,19 @@ def get_runtime_directory() -> Path:
     return Path(__file__).resolve().parent
 
 
+def should_pause_on_exit() -> bool:
+    return getattr(sys, "frozen", False)
+
+
+def pause_before_exit(message: str = "按回车键退出...") -> None:
+    if not should_pause_on_exit():
+        return
+    try:
+        input(message)
+    except EOFError:
+        pass
+
+
 def list_csv_files(directory: Path) -> List[Path]:
     return sorted(
         path
@@ -339,4 +352,17 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    exit_code = 1
+    try:
+        exit_code = main()
+        if exit_code != 0:
+            pause_before_exit()
+    except KeyboardInterrupt:
+        print("")
+        print("用户取消运行")
+        pause_before_exit()
+    except Exception as exc:  # noqa: BLE001
+        print("")
+        print(f"程序异常退出: {exc}")
+        pause_before_exit()
+    sys.exit(exit_code)
