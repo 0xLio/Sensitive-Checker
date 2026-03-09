@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.spec
+.venv/
+venv/
+env/
+
+build/
+dist/
+
+*_result.csv
