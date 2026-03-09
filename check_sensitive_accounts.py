@@ -5,19 +5,23 @@ from __future__ import annotations
 
 import csv
 import json
+import threading
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 API_HOST = "twitter241.p.rapidapi.com"
 API_URL = f"https://{API_HOST}/user?username={{username}}"
 REQUESTS_PER_SECOND = 5
 MIN_REQUEST_INTERVAL = 1 / REQUESTS_PER_SECOND
+MAX_WORKERS = 5
+MAX_IN_FLIGHT = 10
 MAX_RETRIES = 5
 DEFAULT_TIMEOUT = 30
 HEADER_NAMES = {"username", "user", "screen_name", "账号", "用户名"}
@@ -115,16 +119,17 @@ def load_csv_rows(csv_path: Path) -> List[List[str]]:
 class RateLimiter:
     def __init__(self, min_interval: float) -> None:
         self.min_interval = min_interval
-        self.last_request_at = 0.0
+        self.lock = threading.Lock()
+        self.next_request_at = 0.0
 
-    def wait(self) -> None:
-        now = time.monotonic()
-        elapsed = now - self.last_request_at
-        if elapsed < self.min_interval:
-            time.sleep(self.min_interval - elapsed)
-
-    def mark(self) -> None:
-        self.last_request_at = time.monotonic()
+    def acquire(self) -> None:
+        with self.lock:
+            now = time.monotonic()
+            wait_seconds = max(self.next_request_at - now, 0.0)
+            scheduled_at = max(self.next_request_at, now)
+            self.next_request_at = scheduled_at + self.min_interval
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
 
 
 def fetch_user_info(username: str, api_key: str, limiter: RateLimiter) -> Tuple[Optional[bool], str, str]:
@@ -132,7 +137,7 @@ def fetch_user_info(username: str, api_key: str, limiter: RateLimiter) -> Tuple[
     url = API_URL.format(username=encoded_username)
 
     for attempt in range(1, MAX_RETRIES + 1):
-        limiter.wait()
+        limiter.acquire()
         request = urllib.request.Request(
             url,
             headers={
@@ -144,7 +149,6 @@ def fetch_user_info(username: str, api_key: str, limiter: RateLimiter) -> Tuple[
 
         try:
             with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT) as response:
-                limiter.mark()
                 if response.status != 200:
                     raise urllib.error.HTTPError(
                         url, response.status, f"HTTP {response.status}", response.headers, None
@@ -152,7 +156,6 @@ def fetch_user_info(username: str, api_key: str, limiter: RateLimiter) -> Tuple[
                 payload = json.loads(response.read().decode("utf-8"))
                 return parse_user_info(payload)
         except urllib.error.HTTPError as exc:
-            limiter.mark()
             if exc.code == 429:
                 wait_seconds = max(2, attempt)
             elif 500 <= exc.code < 600:
@@ -166,7 +169,6 @@ def fetch_user_info(username: str, api_key: str, limiter: RateLimiter) -> Tuple[
                         body = ""
                 return None, "", f"HTTP {exc.code} {body}".strip()
         except Exception as exc:  # noqa: BLE001
-            limiter.mark()
             wait_seconds = attempt
             if attempt == MAX_RETRIES:
                 return None, "", f"异常: {exc}"
@@ -260,28 +262,20 @@ def process_file(
             writer.writerow(build_header(header_row))
             target.flush()
 
-        for row_number, row in enumerate(rows[start_index:], start=1):
-            if row_number <= processed_rows:
-                continue
+        pending_rows = [
+            (row_number, row)
+            for row_number, row in enumerate(rows[start_index:], start=1)
+            if row_number > processed_rows
+        ]
 
-            username = (row[0] if row else "").strip()
-            if not username:
-                writer.writerow(list(row) + ["", "", "用户名为空"])
-                target.flush()
-                progress_done += 1
-                print_progress(
-                    csv_path.name,
-                    row_number,
-                    total_rows,
-                    progress_done,
-                    progress_total,
-                    "用户名为空，已跳过",
-                )
-                continue
-
-            possibly_sensitive, profile_interstitial_type, error = fetch_user_info(
-                username, api_key, limiter
-            )
+        def write_result(
+            row_number: int,
+            row: List[str],
+            possibly_sensitive: Optional[bool],
+            profile_interstitial_type: str,
+            error: str,
+        ) -> int:
+            nonlocal progress_done
             result_text = normalize_result(possibly_sensitive, profile_interstitial_type, error)
             writer.writerow(
                 list(row)
@@ -293,6 +287,7 @@ def process_file(
             )
             target.flush()
             progress_done += 1
+            username = (row[0] if row else "").strip() or "-"
             detail = (
                 f"{username} -> possibly_sensitive={possibly_sensitive}, "
                 f"profile_interstitial_type={profile_interstitial_type or '-'}, "
@@ -306,6 +301,46 @@ def process_file(
                 progress_total,
                 detail,
             )
+            return progress_done
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            in_flight: Dict[int, Tuple[List[str], Future[Tuple[Optional[bool], str, str]]]] = {}
+            pending_index = 0
+
+            while pending_index < len(pending_rows) or in_flight:
+                while pending_index < len(pending_rows) and len(in_flight) < MAX_IN_FLIGHT:
+                    row_number, row = pending_rows[pending_index]
+                    pending_index += 1
+                    username = (row[0] if row else "").strip()
+
+                    if not username:
+                        writer.writerow(list(row) + ["", "", "用户名为空"])
+                        target.flush()
+                        progress_done += 1
+                        print_progress(
+                            csv_path.name,
+                            row_number,
+                            total_rows,
+                            progress_done,
+                            progress_total,
+                            "用户名为空，已跳过",
+                        )
+                        continue
+
+                    future = executor.submit(fetch_user_info, username, api_key, limiter)
+                    in_flight[row_number] = (row, future)
+
+                next_row_number = min(in_flight)
+                row, future = in_flight[next_row_number]
+                possibly_sensitive, profile_interstitial_type, error = future.result()
+                write_result(
+                    next_row_number,
+                    row,
+                    possibly_sensitive,
+                    profile_interstitial_type,
+                    error,
+                )
+                del in_flight[next_row_number]
 
     return progress_done
 
