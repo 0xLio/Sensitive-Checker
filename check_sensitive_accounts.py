@@ -21,6 +21,15 @@ MIN_REQUEST_INTERVAL = 1 / REQUESTS_PER_SECOND
 MAX_RETRIES = 5
 DEFAULT_TIMEOUT = 30
 HEADER_NAMES = {"username", "user", "screen_name", "账号", "用户名"}
+CSV_ENCODINGS = (
+    "utf-8-sig",
+    "utf-8",
+    "gb18030",
+    "gbk",
+    "utf-16",
+    "utf-16-le",
+    "utf-16-be",
+)
 
 
 def prompt(text: str, default: Optional[str] = None, secret: bool = False) -> str:
@@ -84,6 +93,23 @@ def read_existing_output(output_path: Path) -> Tuple[int, bool]:
             if any(cell.strip() for cell in row):
                 processed_rows += 1
     return processed_rows, header_written
+
+
+def load_csv_rows(csv_path: Path) -> List[List[str]]:
+    last_error: Optional[UnicodeDecodeError] = None
+    for encoding in CSV_ENCODINGS:
+        try:
+            with csv_path.open("r", newline="", encoding=encoding) as source:
+                return list(csv.reader(source))
+        except UnicodeDecodeError as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise ValueError(
+            f"无法识别 CSV 编码，请将文件另存为 UTF-8 后重试: {csv_path.name}"
+        ) from last_error
+
+    return []
 
 
 class RateLimiter:
@@ -189,9 +215,7 @@ def build_header(source_header: Iterable[str]) -> List[str]:
 def count_pending_rows(csv_path: Path) -> int:
     output_path = csv_path.with_name(f"{csv_path.stem}_result.csv")
     processed_rows, _ = read_existing_output(output_path)
-
-    with csv_path.open("r", newline="", encoding="utf-8-sig") as source:
-        rows = list(csv.reader(source))
+    rows = load_csv_rows(csv_path)
 
     if not rows:
         return 0
@@ -212,9 +236,7 @@ def process_file(
 ) -> int:
     output_path = csv_path.with_name(f"{csv_path.stem}_result.csv")
     processed_rows, header_written = read_existing_output(output_path)
-
-    with csv_path.open("r", newline="", encoding="utf-8-sig") as source:
-        rows = list(csv.reader(source))
+    rows = load_csv_rows(csv_path)
 
     if not rows:
         print(f"[跳过] {csv_path.name} 是空文件")
